@@ -31,7 +31,7 @@
     font-variant-numeric: tabular-nums;
     letter-spacing: -0.03em;
     line-height: 1;
-    transition: color 0.2s, transform 0.2s;
+    transition: color 0.2s;
     text-shadow:
       4px 4px 0 #fff,
       6px 6px 0 rgba(255,111,174,0.25);
@@ -229,11 +229,11 @@
     <h3>📜 기록</h3>
     <button class="clear-btn" id="clearBtn">전체 삭제</button>
     <ul class="list" id="historyList"></ul>
-    <div class="stats" id="stats">
-      <span>🎁<b id="cntGift">0</b></span>
-      <span>🍬<b id="cntJelly">0</b></span>
-      <span>⭐<b id="cntStamp">0</b></span>
-      <span>총<b id="cntTotal">0</b></span>
+    <div class="stats">
+      <span>🎁<b data-stat="gift">0</b></span>
+      <span>🍬<b data-stat="jelly">0</b></span>
+      <span>⭐<b data-stat="stamp">0</b></span>
+      <span>총<b data-stat="total">0</b></span>
     </div>
   </aside>
 
@@ -243,52 +243,73 @@
   </div>
 
 <script>
-  const timeEl   = document.getElementById('time');
-  const resultEl = document.getElementById('result');
-  const countEl  = document.getElementById('count');
-  const listEl   = document.getElementById('historyList');
-  const clearBtn = document.getElementById('clearBtn');
-
-  // state: 'idle' | 'running' | 'stopped'
-  let state = 'idle';
-  let startTime = 0;
-  let elapsed = 0;
-  let rafId = null;
+  const $ = (id) => document.getElementById(id);
+  const timeEl   = $('time');
+  const resultEl = $('result');
+  const countEl  = $('count');
+  const listEl   = $('historyList');
+  const clearBtn = $('clearBtn');
+  const statRefs = Object.fromEntries(
+    [...document.querySelectorAll('[data-stat]')].map(el => [el.dataset.stat, el])
+  );
 
   const STORAGE_KEY = 'lucky7-history';
+  const HISTORY_MAX = 50;
+
+  const PRIZES = {
+    gift:  { label: '🎁 상품권', winMsg: '🎁 상품권 당첨!' },
+    jelly: { label: '🍬 젤리',   winMsg: '🍬 젤리 당첨!' },
+    stamp: { label: '⭐ 스탬프', winMsg: '⭐ 스탬프 획득!' },
+    none:  { label: '— 꽝',      winMsg: '아쉽! 다시 도전!' },
+  };
+  const tierFor = (sevens) =>
+    sevens >= 3 ? 'gift' : sevens === 2 ? 'jelly' : sevens === 1 ? 'stamp' : 'none';
+
+  const format = (ms) => (ms / 1000).toFixed(3);
+
+  function renderTime(text, highlight) {
+    if (highlight) {
+      timeEl.innerHTML = text.replace(/7/g, '<span class="digit-7">7</span>');
+    } else {
+      timeEl.textContent = text;
+    }
+  }
+
+  function clearResult() {
+    resultEl.classList.remove('show');
+    resultEl.textContent = '';
+    countEl.textContent = '';
+  }
+
+  // ---- history ----
+
   let history = loadHistory();
-  renderHistory();
 
   function loadHistory() {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      return raw ? JSON.parse(raw) : [];
-    } catch { return []; }
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; }
+    catch { return []; }
   }
   function saveHistory() {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(history)); } catch {}
   }
   function renderHistory() {
-    if (history.length === 0) {
-      listEl.innerHTML = '<li class="empty">아직 기록이 없어요</li>';
-    } else {
-      listEl.innerHTML = history.map(h => {
-        const prizeText = h.cls === 'gift' ? '🎁 상품권'
-                        : h.cls === 'jelly' ? '🍬 젤리'
-                        : h.cls === 'stamp' ? '⭐ 스탬프'
-                        : '— 꽝';
-        return `<li class="item ${h.cls}"><span class="t">${h.time}</span><span class="p">${prizeText}</span></li>`;
-      }).join('');
-      listEl.scrollTop = 0;
-    }
-    document.getElementById('cntGift').textContent  = history.filter(h => h.cls === 'gift').length;
-    document.getElementById('cntJelly').textContent = history.filter(h => h.cls === 'jelly').length;
-    document.getElementById('cntStamp').textContent = history.filter(h => h.cls === 'stamp').length;
-    document.getElementById('cntTotal').textContent = history.length;
+    listEl.innerHTML = history.length === 0
+      ? '<li class="empty">아직 기록이 없어요</li>'
+      : history.map(h =>
+          `<li class="item ${h.cls}"><span class="t">${h.time}</span><span class="p">${PRIZES[h.cls].label}</span></li>`
+        ).join('');
+    listEl.scrollTop = 0;
+
+    const counts = { gift: 0, jelly: 0, stamp: 0 };
+    for (const h of history) if (h.cls in counts) counts[h.cls]++;
+    statRefs.gift.textContent  = counts.gift;
+    statRefs.jelly.textContent = counts.jelly;
+    statRefs.stamp.textContent = counts.stamp;
+    statRefs.total.textContent = history.length;
   }
   function addHistory(time, cls) {
     history.unshift({ time, cls });
-    if (history.length > 50) history.length = 50;
+    if (history.length > HISTORY_MAX) history.length = HISTORY_MAX;
     saveHistory();
     renderHistory();
   }
@@ -299,22 +320,15 @@
       renderHistory();
     }
   });
+  renderHistory();
 
-  function format(ms) {
-    return (ms / 1000).toFixed(3);
-  }
+  // ---- stopwatch ----
 
-  function renderTime(text, highlight) {
-    if (!highlight) {
-      timeEl.textContent = text;
-      return;
-    }
-    let html = '';
-    for (const ch of text) {
-      html += (ch === '7') ? `<span class="digit-7">${ch}</span>` : ch;
-    }
-    timeEl.innerHTML = html;
-  }
+  // state: 'idle' | 'running' | 'stopped'
+  let state = 'idle';
+  let startTime = 0;
+  let elapsed = 0;
+  let rafId = null;
 
   function tick() {
     elapsed = performance.now() - startTime;
@@ -324,11 +338,8 @@
 
   function start() {
     state = 'running';
-    timeEl.classList.remove('stopped');
-    timeEl.classList.add('running');
-    resultEl.classList.remove('show');
-    resultEl.textContent = '';
-    countEl.textContent = '';
+    timeEl.classList.replace('stopped', 'running');
+    clearResult();
     startTime = performance.now();
     tick();
   }
@@ -336,22 +347,16 @@
   function stop() {
     state = 'stopped';
     cancelAnimationFrame(rafId);
-    timeEl.classList.remove('running');
-    timeEl.classList.add('stopped');
+    timeEl.classList.replace('running', 'stopped');
 
     const text = format(elapsed);
     renderTime(text, true);
 
     const sevens = (text.match(/7/g) || []).length;
+    const cls = tierFor(sevens);
     countEl.textContent = `7의 개수: ${sevens}개`;
-
-    let cls = 'none', msg = '아쉽! 다시 도전!';
-    if      (sevens >= 3) { cls = 'gift';  msg = '🎁 상품권 당첨!'; }
-    else if (sevens === 2){ cls = 'jelly'; msg = '🍬 젤리 당첨!'; }
-    else if (sevens === 1){ cls = 'stamp'; msg = '⭐ 스탬프 획득!'; }
-
     resultEl.className = `result show ${cls}`;
-    resultEl.textContent = msg;
+    resultEl.textContent = PRIZES[cls].winMsg;
 
     addHistory(text, cls);
   }
@@ -359,20 +364,17 @@
   function reset() {
     state = 'idle';
     elapsed = 0;
-    renderTime('0.000', false);
-    resultEl.classList.remove('show');
-    resultEl.textContent = '';
-    countEl.textContent = '';
+    renderTime(format(0), false);
+    clearResult();
   }
 
   document.addEventListener('keydown', (e) => {
-    if (e.code === 'Space' || e.code === 'Enter' || e.code === 'NumpadEnter') {
-      e.preventDefault();
-      if (e.repeat) return;
-      if      (state === 'idle')    start();
-      else if (state === 'running') stop();
-      else                          reset();
-    }
+    if (e.code !== 'Space' && e.code !== 'Enter' && e.code !== 'NumpadEnter') return;
+    e.preventDefault();
+    if (e.repeat) return;
+    if      (state === 'idle')    start();
+    else if (state === 'running') stop();
+    else                          reset();
   });
 </script>
 </body>
